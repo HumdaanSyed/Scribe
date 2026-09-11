@@ -42,6 +42,10 @@ export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
   // always calls the latest callback without needing to be re-created.
   const onPCMChunkRef = useRef(onPCMChunk);
   onPCMChunkRef.current = onPCMChunk;
+  // Guards against a double-click starting two concurrent capture setups —
+  // the getUserMedia permission prompt is non-modal, so the page (and the
+  // still-idle Start button) stays clickable while it's up.
+  const startingRef = useRef(false);
 
   const stop = useCallback(() => {
     workletNodeRef.current?.port.close();
@@ -61,6 +65,8 @@ export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
 
   /** Returns whether capture actually started, so callers can react (e.g. tear down a Deepgram connection opened in parallel). */
   const start = useCallback(async (): Promise<boolean> => {
+    if (startingRef.current) return false;
+    startingRef.current = true;
     setState((s) => ({ ...s, error: null }));
 
     try {
@@ -101,6 +107,8 @@ export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
         error: err instanceof Error ? err.message : 'Could not start microphone capture.',
       }));
       return false;
+    } finally {
+      startingRef.current = false;
     }
   }, [stop]);
 

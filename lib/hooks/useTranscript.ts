@@ -18,6 +18,12 @@ interface TranscriptState {
   error: string | null;
 }
 
+// Caps how much audio we'll buffer if the socket never opens (bad token,
+// network issue) — otherwise a long recording against a broken connection
+// accumulates PCM data in memory forever. ~13s at one ~256ms chunk each,
+// comfortably more than a normal connect takes.
+const MAX_PENDING_CHUNKS = 50;
+
 const initialState: TranscriptState = {
   connectionState: 'idle',
   finalText: '',
@@ -34,13 +40,21 @@ export function useTranscript() {
 
   const handleResults = useCallback((message: DeepgramResultsMessage) => {
     const transcript = message.channel.alternatives[0]?.transcript ?? '';
-    if (!transcript) return;
 
-    setState((s) =>
-      message.is_final
-        ? { ...s, finalText: s.finalText ? `${s.finalText} ${transcript}` : transcript, interimText: '' }
-        : { ...s, interimText: transcript },
-    );
+    if (message.is_final) {
+      // An empty final adds nothing — skip it rather than appending a stray space.
+      if (!transcript) return;
+      setState((s) => ({
+        ...s,
+        finalText: s.finalText ? `${s.finalText} ${transcript}` : transcript,
+        interimText: '',
+      }));
+    } else {
+      // Always apply interim text, even empty — Deepgram can retract an
+      // in-progress hypothesis, and the ephemeral buffer should reflect that
+      // instead of leaving stale text on screen.
+      setState((s) => ({ ...s, interimText: transcript }));
+    }
   }, []);
 
   const connect = useCallback(async () => {
@@ -49,6 +63,10 @@ export function useTranscript() {
     try {
       const socket = await openDeepgramConnection({
         onOpen: () => {
+          // Ignore late events from a socket that disconnect()/a newer
+          // connect() has already superseded — otherwise a stale connection
+          // can resurrect old state or send buffered audio to the wrong socket.
+          if (socketRef.current !== socket) return;
           setState((s) => ({ ...s, connectionState: 'open' }));
           for (const chunk of pendingChunksRef.current) {
             sendAudioChunk(socket, chunk);
@@ -57,6 +75,7 @@ export function useTranscript() {
         },
         onResults: handleResults,
         onError: () => {
+          if (socketRef.current !== socket) return;
           setState((s) => ({
             ...s,
             connectionState: 'error',
@@ -64,6 +83,7 @@ export function useTranscript() {
           }));
         },
         onClose: () => {
+          if (socketRef.current !== socket) return;
           setState((s) => (s.connectionState === 'error' ? s : { ...s, connectionState: 'closed' }));
         },
       });
@@ -84,6 +104,9 @@ export function useTranscript() {
       sendAudioChunk(socket, chunk);
     } else {
       pendingChunksRef.current.push(chunk);
+      if (pendingChunksRef.current.length > MAX_PENDING_CHUNKS) {
+        pendingChunksRef.current.shift();
+      }
     }
   }, []);
 
