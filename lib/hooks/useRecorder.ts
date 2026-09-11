@@ -27,12 +27,21 @@ function rms(pcm16: Int16Array): number {
   return Math.sqrt(sumSquares / pcm16.length);
 }
 
-export function useRecorder() {
+interface UseRecorderOptions {
+  /** Called with each raw PCM16 chunk as it arrives, e.g. to forward it to Deepgram. */
+  onPCMChunk?: (chunk: ArrayBuffer) => void;
+}
+
+export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
   const [state, setState] = useState<RecorderState>(initialState);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
+  // Kept in a ref so the worklet's onmessage handler (bound once, at start)
+  // always calls the latest callback without needing to be re-created.
+  const onPCMChunkRef = useRef(onPCMChunk);
+  onPCMChunkRef.current = onPCMChunk;
 
   const stop = useCallback(() => {
     workletNodeRef.current?.port.close();
@@ -50,7 +59,8 @@ export function useRecorder() {
     setState((s) => ({ ...s, status: 'idle', level: 0 }));
   }, []);
 
-  const start = useCallback(async () => {
+  /** Returns whether capture actually started, so callers can react (e.g. tear down a Deepgram connection opened in parallel). */
+  const start = useCallback(async (): Promise<boolean> => {
     setState((s) => ({ ...s, error: null }));
 
     try {
@@ -72,8 +82,7 @@ export function useRecorder() {
       workletNode.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
         const pcm16 = new Int16Array(event.data);
         setState((s) => ({ ...s, level: rms(pcm16) }));
-        // Phase 2 will also forward `event.data` as a binary WebSocket
-        // frame to Deepgram here.
+        onPCMChunkRef.current?.(event.data);
       };
 
       mixedSource.connect(workletNode);
@@ -83,6 +92,7 @@ export function useRecorder() {
       workletNode.connect(audioContext.destination);
 
       setState((s) => ({ ...s, status: 'recording' }));
+      return true;
     } catch (err) {
       stop();
       setState((s) => ({
@@ -90,6 +100,7 @@ export function useRecorder() {
         status: 'idle',
         error: err instanceof Error ? err.message : 'Could not start microphone capture.',
       }));
+      return false;
     }
   }, [stop]);
 
