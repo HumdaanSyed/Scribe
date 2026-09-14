@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { getMicStream, stopStream } from '@/lib/audio/capture';
+import { getDisplayAudioStream, getMicStream, stopStream } from '@/lib/audio/capture';
 import { createAudioContext, mixStreams } from '@/lib/audio/mixer';
 import { AUDIO_PROCESSOR_NAME, loadAudioWorklet } from '@/lib/audio/worklet-loader';
 
@@ -26,6 +26,17 @@ function rms(pcm16: Int16Array): number {
   return Math.sqrt(sumSquares / pcm16.length);
 }
 
+export interface StartSources {
+  mic: boolean;
+  systemAudio: boolean;
+}
+
+export interface StartResult {
+  started: boolean;
+  /** Set when system audio was requested but couldn't be captured — mic (if requested) may still be running. */
+  systemAudioError?: string;
+}
+
 interface UseRecorderOptions {
   /** Called with each raw PCM16 chunk as it arrives, e.g. to forward it to Deepgram. */
   onPCMChunk?: (chunk: ArrayBuffer) => void;
@@ -36,7 +47,10 @@ export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
-  const micStreamRef = useRef<MediaStream | null>(null);
+  // All acquired sources (mic and/or system audio) — tracked together so
+  // every track gets stopped on teardown, whichever combination was used
+  // (PLAN.md section 4).
+  const streamsRef = useRef<MediaStream[]>([]);
   // Kept in a ref so the worklet's onmessage handler (bound once, at start)
   // always calls the latest callback without needing to be re-created.
   const onPCMChunkRef = useRef(onPCMChunk);
@@ -60,8 +74,8 @@ export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
     }
     audioContextRef.current = null;
 
-    stopStream(micStreamRef.current);
-    micStreamRef.current = null;
+    streamsRef.current.forEach(stopStream);
+    streamsRef.current = [];
 
     isPausedRef.current = false;
     setState((s) => ({ ...s, status: 'idle', level: 0 }));
@@ -85,23 +99,60 @@ export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
   }, []);
 
   /** Returns whether capture actually started, so callers can react (e.g. tear down a Deepgram connection opened in parallel). */
-  const start = useCallback(async (): Promise<boolean> => {
-    if (startingRef.current) return false;
+  const start = useCallback(async (sources: StartSources): Promise<StartResult> => {
+    if (startingRef.current) return { started: false };
     startingRef.current = true;
     isPausedRef.current = false;
     setState((s) => ({ ...s, error: null }));
 
+    const streams: MediaStream[] = [];
+    let systemAudioError: string | undefined;
+
     try {
-      const micStream = await getMicStream();
-      micStreamRef.current = micStream;
+      if (sources.mic) {
+        try {
+          streams.push(await getMicStream());
+        } catch (err) {
+          // Mic is the explicitly-requested primary source — its failure
+          // is fatal, unlike system audio below.
+          setState((s) => ({
+            ...s,
+            status: 'idle',
+            error: err instanceof Error ? err.message : 'Could not start microphone capture.',
+          }));
+          return { started: false };
+        }
+      }
+
+      if (sources.systemAudio) {
+        try {
+          streams.push(await getDisplayAudioStream());
+        } catch (err) {
+          // Don't let system audio failing (cancelled picker, shared a
+          // window instead of a tab, forgot "Share tab audio") sink an
+          // already-working mic capture — surface it and continue with
+          // whatever source(s) succeeded (PLAN.md section 4).
+          systemAudioError = err instanceof Error ? err.message : 'Could not capture system audio.';
+        }
+      }
+
+      if (streams.length === 0) {
+        setState((s) => ({
+          ...s,
+          status: 'idle',
+          error: systemAudioError ?? 'No audio source was captured.',
+        }));
+        return { started: false, systemAudioError };
+      }
+
+      streamsRef.current = streams;
 
       const audioContext = createAudioContext();
       audioContextRef.current = audioContext;
       await loadAudioWorklet(audioContext);
 
-      // Route mic → mixer destination → worklet. A no-op today (single
-      // source), but it's the same path Phase 5 mixes tab audio into.
-      const { destination } = mixStreams(audioContext, [micStream]);
+      // Web Audio sums every source into one signal — this is the mixing.
+      const { destination } = mixStreams(audioContext, streams);
       const mixedSource = audioContext.createMediaStreamSource(destination.stream);
 
       const workletNode = new AudioWorkletNode(audioContext, AUDIO_PROCESSOR_NAME);
@@ -120,16 +171,16 @@ export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
       // by the audio graph's rendering quantum.
       workletNode.connect(audioContext.destination);
 
-      setState((s) => ({ ...s, status: 'recording' }));
-      return true;
+      setState((s) => ({ ...s, status: 'recording', error: systemAudioError ?? null }));
+      return { started: true, systemAudioError };
     } catch (err) {
       stop();
       setState((s) => ({
         ...s,
         status: 'idle',
-        error: err instanceof Error ? err.message : 'Could not start microphone capture.',
+        error: err instanceof Error ? err.message : 'Could not start audio capture.',
       }));
-      return false;
+      return { started: false };
     } finally {
       startingRef.current = false;
     }
