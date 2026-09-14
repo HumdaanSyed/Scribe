@@ -63,8 +63,15 @@ export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
   // should stop the worklet's process() from being called, but this makes
   // sure a stray late message never gets forwarded while paused.
   const isPausedRef = useRef(false);
+  // stop() calling track.stop() also fires each track's 'ended' event —
+  // this distinguishes that expected case from a track ending on its own
+  // (e.g. the user clicks Chrome's native "Stop sharing" control) so we
+  // only surface the latter as an error.
+  const intentionalStopRef = useRef(false);
 
   const stop = useCallback(() => {
+    intentionalStopRef.current = true;
+
     workletNodeRef.current?.port.close();
     workletNodeRef.current?.disconnect();
     workletNodeRef.current = null;
@@ -79,6 +86,24 @@ export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
 
     isPausedRef.current = false;
     setState((s) => ({ ...s, status: 'idle', level: 0 }));
+  }, []);
+
+  /**
+   * Surfaces a clear error if a captured source ends on its own mid-session
+   * — e.g. the user clicks Chrome's native "Stop sharing" control for a
+   * shared tab — instead of silently continuing to "record" without it.
+   */
+  const watchForUnexpectedEnd = useCallback((stream: MediaStream, sourceLabel: string) => {
+    stream.getTracks().forEach((track) => {
+      track.addEventListener(
+        'ended',
+        () => {
+          if (intentionalStopRef.current) return;
+          setState((s) => ({ ...s, error: `${sourceLabel} stopped unexpectedly.` }));
+        },
+        { once: true },
+      );
+    });
   }, []);
 
   /**
@@ -103,6 +128,7 @@ export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
     if (startingRef.current) return { started: false };
     startingRef.current = true;
     isPausedRef.current = false;
+    intentionalStopRef.current = false;
     setState((s) => ({ ...s, error: null }));
 
     const streams: MediaStream[] = [];
@@ -111,7 +137,9 @@ export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
     try {
       if (sources.mic) {
         try {
-          streams.push(await getMicStream());
+          const micStream = await getMicStream();
+          streams.push(micStream);
+          watchForUnexpectedEnd(micStream, 'Microphone');
         } catch (err) {
           // Mic is the explicitly-requested primary source — its failure
           // is fatal, unlike system audio below.
@@ -126,7 +154,9 @@ export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
 
       if (sources.systemAudio) {
         try {
-          streams.push(await getDisplayAudioStream());
+          const displayStream = await getDisplayAudioStream();
+          streams.push(displayStream);
+          watchForUnexpectedEnd(displayStream, 'System audio');
         } catch (err) {
           // Don't let system audio failing (cancelled picker, shared a
           // window instead of a tab, forgot "Share tab audio") sink an
@@ -184,7 +214,7 @@ export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
     } finally {
       startingRef.current = false;
     }
-  }, [stop]);
+  }, [stop, watchForUnexpectedEnd]);
 
   return { ...state, start, stop, pause, resume };
 }

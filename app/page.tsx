@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useRecorder } from '@/lib/hooks/useRecorder';
 import { useTranscript } from '@/lib/hooks/useTranscript';
 import { AudioLevelMeter } from '@/components/controls/AudioLevelMeter';
@@ -16,19 +16,34 @@ export default function Home() {
 
   const [micEnabled, setMicEnabled] = useState(true);
   const [systemAudioEnabled, setSystemAudioEnabled] = useState(false);
+  // Guards against a second Start click while one is already in flight —
+  // recorder.status stays 'idle' (Start still visible/enabled) for the
+  // whole async start(), which can now take a while if the user is still
+  // working through the getDisplayMedia tab picker.
+  const startingRef = useRef(false);
+  const [isStarting, setIsStarting] = useState(false);
 
   const handleStart = useCallback(async () => {
-    await transcript.connect();
-    const result = await recorder.start({ mic: micEnabled, systemAudio: systemAudioEnabled });
-    if (!result.started) {
-      // Neither source captured — don't leave the Deepgram socket open
-      // with nothing feeding it.
-      transcript.disconnect();
-    }
-    if (result.systemAudioError) {
-      // Leave the toggle off rather than silently recording without it
-      // (PLAN.md section 4) — recorder.error already carries the message.
-      setSystemAudioEnabled(false);
+    if (startingRef.current) return;
+    startingRef.current = true;
+    setIsStarting(true);
+
+    try {
+      await transcript.connect();
+      const result = await recorder.start({ mic: micEnabled, systemAudio: systemAudioEnabled });
+      if (!result.started) {
+        // Neither source captured — don't leave the Deepgram socket open
+        // with nothing feeding it.
+        transcript.disconnect();
+      }
+      if (result.systemAudioError) {
+        // Leave the toggle off rather than silently recording without it
+        // (PLAN.md section 4) — recorder.error already carries the message.
+        setSystemAudioEnabled(false);
+      }
+    } finally {
+      startingRef.current = false;
+      setIsStarting(false);
     }
   }, [transcript, recorder, micEnabled, systemAudioEnabled]);
 
@@ -84,10 +99,10 @@ export default function Home() {
           {recorder.status === 'idle' && (
             <button
               onClick={handleStart}
-              disabled={!micEnabled && !systemAudioEnabled}
+              disabled={(!micEnabled && !systemAudioEnabled) || isStarting}
               className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Start
+              {isStarting ? 'Starting…' : 'Start'}
             </button>
           )}
           {recorder.status === 'recording' && (
