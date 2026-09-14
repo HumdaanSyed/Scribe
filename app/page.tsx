@@ -4,9 +4,11 @@ import { useCallback } from 'react';
 import { useRecorder } from '@/lib/hooks/useRecorder';
 import { useTranscript } from '@/lib/hooks/useTranscript';
 import { AudioLevelMeter } from '@/components/controls/AudioLevelMeter';
+import { TranscriptView } from '@/components/transcript/TranscriptView';
 
-// TEMPORARY Phase 1/2 test harness. This route becomes the real Home/History
-// screen (PLAN.md section 12) in Phase 6 — this content gets replaced then.
+// TEMPORARY Phase 1/2/3 test harness. This route becomes the real
+// Home/History screen (PLAN.md section 12) in Phase 6 — this content gets
+// replaced then.
 export default function Home() {
   const transcript = useTranscript();
   const recorder = useRecorder({ onPCMChunk: transcript.sendChunk });
@@ -31,11 +33,10 @@ export default function Home() {
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col items-center justify-center gap-6 p-8">
       <div className="w-full rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-        <h1 className="text-lg font-semibold text-gray-900">
-          Phase 2 — Live transcription test
-        </h1>
+        <h1 className="text-lg font-semibold text-gray-900">Phase 3 — Speaker model test</h1>
         <p className="mt-1 text-sm text-gray-500">
-          Mic → AudioWorklet → Deepgram WebSocket. Speak and confirm text appears.
+          Speak — words group into speaker turns by Deepgram&rsquo;s diarization. Click a speaker
+          name to rename it; every turn by that speaker updates instantly.
         </p>
 
         <div className="mt-6">
@@ -65,15 +66,13 @@ export default function Home() {
 
         {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
 
-        <div className="mt-6 min-h-[8rem] rounded-lg bg-gray-50 p-4 text-sm leading-relaxed text-gray-900">
-          {transcript.finalText || transcript.interimText ? (
-            <p>
-              {transcript.finalText}{' '}
-              <span className="text-gray-400">{transcript.interimText}</span>
-            </p>
-          ) : (
-            <p className="text-gray-400">Transcript will appear here…</p>
-          )}
+        <div className="mt-6">
+          <TranscriptView
+            words={transcript.words}
+            speakers={transcript.speakers}
+            interimText={transcript.interimText}
+            onRenameSpeaker={transcript.renameSpeaker}
+          />
         </div>
       </div>
     </main>
