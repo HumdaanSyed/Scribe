@@ -5,8 +5,7 @@ import { getMicStream, stopStream } from '@/lib/audio/capture';
 import { createAudioContext, mixStreams } from '@/lib/audio/mixer';
 import { AUDIO_PROCESSOR_NAME, loadAudioWorklet } from '@/lib/audio/worklet-loader';
 
-// Phase 1 only knows idle/recording. Phase 4 adds 'paused'.
-export type RecorderStatus = 'idle' | 'recording';
+export type RecorderStatus = 'idle' | 'recording' | 'paused';
 
 interface RecorderState {
   status: RecorderStatus;
@@ -46,6 +45,10 @@ export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
   // the getUserMedia permission prompt is non-modal, so the page (and the
   // still-idle Start button) stays clickable while it's up.
   const startingRef = useRef(false);
+  // Belt-and-suspenders alongside AudioContext.suspend() — that alone
+  // should stop the worklet's process() from being called, but this makes
+  // sure a stray late message never gets forwarded while paused.
+  const isPausedRef = useRef(false);
 
   const stop = useCallback(() => {
     workletNodeRef.current?.port.close();
@@ -60,13 +63,32 @@ export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
     stopStream(micStreamRef.current);
     micStreamRef.current = null;
 
+    isPausedRef.current = false;
     setState((s) => ({ ...s, status: 'idle', level: 0 }));
+  }, []);
+
+  /**
+   * Suspends the AudioContext and stops forwarding audio, but keeps the
+   * media tracks live so resume is instant and the OS permission prompt
+   * doesn't reappear (PLAN.md section 6).
+   */
+  const pause = useCallback(() => {
+    isPausedRef.current = true;
+    audioContextRef.current?.suspend().catch(() => {});
+    setState((s) => (s.status === 'recording' ? { ...s, status: 'paused', level: 0 } : s));
+  }, []);
+
+  const resume = useCallback(() => {
+    isPausedRef.current = false;
+    audioContextRef.current?.resume().catch(() => {});
+    setState((s) => (s.status === 'paused' ? { ...s, status: 'recording' } : s));
   }, []);
 
   /** Returns whether capture actually started, so callers can react (e.g. tear down a Deepgram connection opened in parallel). */
   const start = useCallback(async (): Promise<boolean> => {
     if (startingRef.current) return false;
     startingRef.current = true;
+    isPausedRef.current = false;
     setState((s) => ({ ...s, error: null }));
 
     try {
@@ -86,6 +108,7 @@ export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
       workletNodeRef.current = workletNode;
 
       workletNode.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+        if (isPausedRef.current) return;
         const pcm16 = new Int16Array(event.data);
         setState((s) => ({ ...s, level: rms(pcm16) }));
         onPCMChunkRef.current?.(event.data);
@@ -112,5 +135,5 @@ export function useRecorder({ onPCMChunk }: UseRecorderOptions = {}) {
     }
   }, [stop]);
 
-  return { ...state, start, stop };
+  return { ...state, start, stop, pause, resume };
 }

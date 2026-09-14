@@ -15,3 +15,8 @@ export interface Word {
   end: number;
   speakerId: SpeakerId;
 }
+
+export interface SessionBoundary {
+  afterWordIndex: number; // marker rendered after this word
+  reason: string;
+}
