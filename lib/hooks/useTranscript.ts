@@ -222,6 +222,14 @@ export function useTranscript() {
           },
         });
 
+        if (intentionalCloseRef.current) {
+          // Stop was clicked while this (re)connect was still in flight —
+          // socketRef.current was null so disconnect() had nothing to
+          // close. Don't adopt a socket the user already asked to stop.
+          socket.close();
+          return;
+        }
+
         socketRef.current = socket;
       } catch (err) {
         setState((s) => ({
@@ -242,6 +250,9 @@ export function useTranscript() {
     wordTimeOffsetRef.current = 0;
     lastWordEndRef.current = 0;
     reconnectAttemptsRef.current = 0;
+    // A fresh recording shouldn't inherit words/speakers (e.g. a rename)
+    // from whatever was previously on screen.
+    setState(initialState);
     await connectSocket(false);
   }, [connectSocket]);
 

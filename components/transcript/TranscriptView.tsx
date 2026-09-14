@@ -51,13 +51,15 @@ export function TranscriptView({
     containerRef.current?.scrollTo({ top: containerRef.current.scrollHeight, behavior: 'smooth' });
   };
 
-  const isEmpty = turns.length === 0 && !interimText;
+  const isEmpty = turns.length === 0 && !interimText && boundaries.length === 0;
 
   // afterWordIndex is always a cumulative word count that lands exactly on
   // a turn boundary (it's recorded as words.length at the moment of a
   // reconnect), so a plain map lookup by running word count is enough to
-  // know where each marker belongs.
+  // know where each marker belongs. 0 is its own case — a drop before any
+  // words exist — since no turn's cumulative count is ever 0.
   const boundariesByWordCount = new Map(boundaries.map((b) => [b.afterWordIndex, b]));
+  const leadingBoundary = boundariesByWordCount.get(0);
   const cumulativeWordCounts = turns.reduce<number[]>((counts, turn) => {
     const previous = counts.length > 0 ? counts[counts.length - 1] : 0;
     counts.push(previous + turn.words.length);
@@ -75,6 +77,7 @@ export function TranscriptView({
           <p className="text-sm text-gray-400">Transcript will appear here…</p>
         ) : (
           <>
+            {leadingBoundary && <SessionBoundaryMarker reason={leadingBoundary.reason} />}
             {turns.map((turn, i) => {
               const boundary = boundariesByWordCount.get(cumulativeWordCounts[i]);
 
