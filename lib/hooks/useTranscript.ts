@@ -6,13 +6,14 @@ import {
   openDeepgramConnection,
   sendAudioChunk,
 } from '@/lib/deepgram/connection';
+import type { Speaker, SpeakerId, Word } from '@/lib/transcript/model';
 
 export type TranscriptConnectionState = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
 
 interface TranscriptState {
   connectionState: TranscriptConnectionState;
-  /** Committed text from is_final results, space-joined. Phase 3 replaces this with word-level speaker turns. */
-  finalText: string;
+  words: Word[];
+  speakers: Record<SpeakerId, Speaker>;
   /** Ephemeral in-progress text, replaced wholesale on each interim message. */
   interimText: string;
   error: string | null;
@@ -26,10 +27,20 @@ const MAX_PENDING_CHUNKS = 50;
 
 const initialState: TranscriptState = {
   connectionState: 'idle',
-  finalText: '',
+  words: [],
+  speakers: {},
   interimText: '',
   error: null,
 };
+
+/**
+ * Maps Deepgram's per-connection integer speaker index to a stable app
+ * SpeakerId (PLAN.md section 7). Phase 4 offsets this after a reconnect so
+ * indices from a new connection never collide with speakers already seen.
+ */
+function speakerIdForIndex(index: number): SpeakerId {
+  return `spk_${index}`;
+}
 
 export function useTranscript() {
   const [state, setState] = useState<TranscriptState>(initialState);
@@ -39,22 +50,55 @@ export function useTranscript() {
   const pendingChunksRef = useRef<ArrayBuffer[]>([]);
 
   const handleResults = useCallback((message: DeepgramResultsMessage) => {
-    const transcript = message.channel.alternatives[0]?.transcript ?? '';
+    const alternative = message.channel.alternatives[0];
+    const transcript = alternative?.transcript ?? '';
 
-    if (message.is_final) {
-      // An empty final adds nothing — skip it rather than appending a stray space.
-      if (!transcript) return;
-      setState((s) => ({
-        ...s,
-        finalText: s.finalText ? `${s.finalText} ${transcript}` : transcript,
-        interimText: '',
-      }));
-    } else {
+    if (!message.is_final) {
       // Always apply interim text, even empty — Deepgram can retract an
       // in-progress hypothesis, and the ephemeral buffer should reflect that
       // instead of leaving stale text on screen.
       setState((s) => ({ ...s, interimText: transcript }));
+      return;
     }
+
+    const newWords = alternative?.words ?? [];
+    if (newWords.length === 0) return;
+
+    setState((s) => {
+      // Never denormalize a speaker's display name onto a word — words
+      // store only speakerId, so renaming stays a single-field mutation.
+      const speakers = { ...s.speakers };
+      let nextOrdinal = Object.keys(speakers).length;
+
+      const words: Word[] = newWords.map((w) => {
+        const speakerId = speakerIdForIndex(w.speaker ?? 0);
+        if (!speakers[speakerId]) {
+          speakers[speakerId] = {
+            id: speakerId,
+            label: `Speaker ${nextOrdinal + 1}`,
+            colorIndex: nextOrdinal,
+          };
+          nextOrdinal += 1;
+        }
+        return { text: w.punctuated_word || w.word, start: w.start, end: w.end, speakerId };
+      });
+
+      return { ...s, words: [...s.words, ...words], speakers, interimText: '' };
+    });
+  }, []);
+
+  const renameSpeaker = useCallback((speakerId: SpeakerId, label: string) => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+
+    setState((s) =>
+      s.speakers[speakerId]
+        ? {
+            ...s,
+            speakers: { ...s.speakers, [speakerId]: { ...s.speakers[speakerId], label: trimmed } },
+          }
+        : s,
+    );
   }, []);
 
   const connect = useCallback(async () => {
@@ -117,5 +161,5 @@ export function useTranscript() {
     setState((s) => ({ ...s, connectionState: 'idle' }));
   }, []);
 
-  return { ...state, connect, disconnect, sendChunk };
+  return { ...state, connect, disconnect, sendChunk, renameSpeaker };
 }
