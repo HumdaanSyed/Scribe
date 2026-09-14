@@ -1,14 +1,16 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { Speaker, SpeakerId, Word } from '@/lib/transcript/model';
+import type { SessionBoundary, Speaker, SpeakerId, Word } from '@/lib/transcript/model';
 import { groupWordsIntoTurns } from '@/lib/transcript/grouping';
 import { Turn } from './Turn';
 import { InterimText } from './InterimText';
+import { SessionBoundaryMarker } from './SessionBoundaryMarker';
 
 interface TranscriptViewProps {
   words: Word[];
   speakers: Record<SpeakerId, Speaker>;
+  boundaries: SessionBoundary[];
   interimText: string;
   onRenameSpeaker: (speakerId: SpeakerId, label: string) => void;
 }
@@ -18,7 +20,13 @@ const FALLBACK_SPEAKER: Speaker = { id: '', label: 'Unknown speaker', colorIndex
 // pixel-perfectly land at the end to keep auto-scroll engaged.
 const AUTO_SCROLL_THRESHOLD_PX = 32;
 
-export function TranscriptView({ words, speakers, interimText, onRenameSpeaker }: TranscriptViewProps) {
+export function TranscriptView({
+  words,
+  speakers,
+  boundaries,
+  interimText,
+  onRenameSpeaker,
+}: TranscriptViewProps) {
   const turns = groupWordsIntoTurns(words);
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -45,6 +53,17 @@ export function TranscriptView({ words, speakers, interimText, onRenameSpeaker }
 
   const isEmpty = turns.length === 0 && !interimText;
 
+  // afterWordIndex is always a cumulative word count that lands exactly on
+  // a turn boundary (it's recorded as words.length at the moment of a
+  // reconnect), so a plain map lookup by running word count is enough to
+  // know where each marker belongs.
+  const boundariesByWordCount = new Map(boundaries.map((b) => [b.afterWordIndex, b]));
+  const cumulativeWordCounts = turns.reduce<number[]>((counts, turn) => {
+    const previous = counts.length > 0 ? counts[counts.length - 1] : 0;
+    counts.push(previous + turn.words.length);
+    return counts;
+  }, []);
+
   return (
     <div className="relative">
       <div
@@ -56,15 +75,21 @@ export function TranscriptView({ words, speakers, interimText, onRenameSpeaker }
           <p className="text-sm text-gray-400">Transcript will appear here…</p>
         ) : (
           <>
-            {turns.map((turn, i) => (
-              <Turn
-                key={turn.words[0]?.start ?? i}
-                turn={turn}
-                speaker={speakers[turn.speakerId] ?? { ...FALLBACK_SPEAKER, id: turn.speakerId }}
-                onRenameSpeaker={(label) => onRenameSpeaker(turn.speakerId, label)}
-                interimText={i === turns.length - 1 ? interimText : undefined}
-              />
-            ))}
+            {turns.map((turn, i) => {
+              const boundary = boundariesByWordCount.get(cumulativeWordCounts[i]);
+
+              return (
+                <div key={turn.words[0]?.start ?? i}>
+                  <Turn
+                    turn={turn}
+                    speaker={speakers[turn.speakerId] ?? { ...FALLBACK_SPEAKER, id: turn.speakerId }}
+                    onRenameSpeaker={(label) => onRenameSpeaker(turn.speakerId, label)}
+                    interimText={i === turns.length - 1 ? interimText : undefined}
+                  />
+                  {boundary && <SessionBoundaryMarker reason={boundary.reason} />}
+                </div>
+              );
+            })}
             {turns.length === 0 && <InterimText text={interimText} />}
           </>
         )}
