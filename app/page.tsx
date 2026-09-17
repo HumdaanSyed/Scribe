@@ -1,158 +1,108 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
-import { useRecorder } from '@/lib/hooks/useRecorder';
-import { useTranscript } from '@/lib/hooks/useTranscript';
-import { AudioLevelMeter } from '@/components/controls/AudioLevelMeter';
-import { AudioSourceToggles } from '@/components/controls/AudioSourceToggles';
-import { TranscriptView } from '@/components/transcript/TranscriptView';
+import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { deleteMeeting, listMeetings } from '@/lib/storage/meetings';
+import type { Meeting } from '@/lib/transcript/model';
+import { formatTimestamp } from '@/lib/transcript/formatting';
 
-// TEMPORARY Phase 1-5 test harness. This route becomes the real
-// Home/History screen (PLAN.md section 12) in Phase 6 — this content gets
-// replaced then.
+function formatDate(ms: number): string {
+  return new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+// TEMPORARY styling. This is the real Home/History screen (PLAN.md section
+// 12) — Phase 9 applies the full design system on top of this structure.
 export default function Home() {
-  const transcript = useTranscript();
-  const recorder = useRecorder({ onPCMChunk: transcript.sendChunk });
+  const router = useRouter();
+  const [meetings, setMeetings] = useState<Meeting[] | null>(null);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
 
-  const [micEnabled, setMicEnabled] = useState(true);
-  const [systemAudioEnabled, setSystemAudioEnabled] = useState(false);
-  // Guards against a second Start click while one is already in flight —
-  // recorder.status stays 'idle' (Start still visible/enabled) for the
-  // whole async start(), which can now take a while if the user is still
-  // working through the getDisplayMedia tab picker.
-  const startingRef = useRef(false);
-  const [isStarting, setIsStarting] = useState(false);
+  const refresh = useCallback(() => {
+    listMeetings().then(setMeetings);
+  }, []);
 
-  const handleStart = useCallback(async () => {
-    if (startingRef.current) return;
-    startingRef.current = true;
-    setIsStarting(true);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
-    try {
-      await transcript.connect();
-      const result = await recorder.start({ mic: micEnabled, systemAudio: systemAudioEnabled });
-      if (!result.started) {
-        // Neither source captured — don't leave the Deepgram socket open
-        // with nothing feeding it.
-        transcript.disconnect();
+  const handleNewMeeting = useCallback(() => {
+    router.push(`/meeting/${crypto.randomUUID()}`);
+  }, [router]);
+
+  const handleDelete = useCallback(
+    async (id: string) => {
+      if (confirmingDeleteId !== id) {
+        setConfirmingDeleteId(id);
+        return;
       }
-      if (result.systemAudioError) {
-        // Leave the toggle off rather than silently recording without it
-        // (PLAN.md section 4) — recorder.error already carries the message.
-        setSystemAudioEnabled(false);
-      }
-    } finally {
-      startingRef.current = false;
-      setIsStarting(false);
-    }
-  }, [transcript, recorder, micEnabled, systemAudioEnabled]);
-
-  const handlePause = useCallback(() => {
-    recorder.pause();
-    transcript.pause();
-  }, [recorder, transcript]);
-
-  const handleResume = useCallback(() => {
-    recorder.resume();
-    transcript.resume();
-  }, [recorder, transcript]);
-
-  const handleStop = useCallback(() => {
-    recorder.stop();
-    transcript.disconnect();
-  }, [recorder, transcript]);
-
-  const error = recorder.error ?? transcript.error;
-  const sourcesLocked = recorder.status !== 'idle';
+      await deleteMeeting(id);
+      setConfirmingDeleteId(null);
+      refresh();
+    },
+    [confirmingDeleteId, refresh],
+  );
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col items-center justify-center gap-6 p-8">
-      <div className="w-full rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold text-gray-900">Phase 5 — System audio test</h1>
-          {recorder.status === 'paused' && (
-            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-amber-700">
-              Paused
-            </span>
-          )}
-        </div>
-        <p className="mt-1 text-sm text-gray-500">
-          Toggle sources, Start — mic and a shared Chrome tab&rsquo;s audio can both feed the
-          same transcript.
-        </p>
+    <main className="mx-auto max-w-3xl p-8">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold text-gray-900">Scribe</h1>
+        <button
+          onClick={handleNewMeeting}
+          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+        >
+          New meeting
+        </button>
+      </div>
 
-        <div className="mt-4">
-          <AudioSourceToggles
-            micEnabled={micEnabled}
-            systemAudioEnabled={systemAudioEnabled}
-            onMicChange={setMicEnabled}
-            onSystemAudioChange={setSystemAudioEnabled}
-            disabled={sourcesLocked}
-          />
-        </div>
-
-        <div className="mt-6">
-          <AudioLevelMeter level={recorder.level} />
-        </div>
-
-        <div className="mt-6 flex items-center gap-3">
-          {recorder.status === 'idle' && (
+      <div className="mt-8">
+        {meetings === null ? (
+          <p className="text-sm text-gray-400">Loading…</p>
+        ) : meetings.length === 0 ? (
+          <div className="flex flex-col items-center gap-4 py-24 text-center">
+            <p className="text-sm text-gray-500">No meetings yet — start your first recording.</p>
             <button
-              onClick={handleStart}
-              disabled={(!micEnabled && !systemAudioEnabled) || isStarting}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={handleNewMeeting}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
             >
-              {isStarting ? 'Starting…' : 'Start'}
+              New meeting
             </button>
-          )}
-          {recorder.status === 'recording' && (
-            <>
-              <button
-                onClick={handlePause}
-                className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white hover:bg-amber-600"
-              >
-                Pause
-              </button>
-              <button
-                onClick={handleStop}
-                className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-              >
-                Stop
-              </button>
-            </>
-          )}
-          {recorder.status === 'paused' && (
-            <>
-              <button
-                onClick={handleResume}
-                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-              >
-                Resume
-              </button>
-              <button
-                onClick={handleStop}
-                className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-              >
-                Stop
-              </button>
-            </>
-          )}
-          <span className="font-mono text-xs uppercase tracking-wide text-gray-500">
-            mic: {recorder.status} · deepgram: {transcript.connectionState}
-          </span>
-        </div>
+          </div>
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {meetings.map((meeting) => {
+              const speakerCount = Object.keys(meeting.speakers).length;
+              const confirming = confirmingDeleteId === meeting.id;
 
-        {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
-
-        <div className="mt-6">
-          <TranscriptView
-            words={transcript.words}
-            speakers={transcript.speakers}
-            boundaries={transcript.boundaries}
-            interimText={transcript.interimText}
-            onRenameSpeaker={transcript.renameSpeaker}
-          />
-        </div>
+              return (
+                <li
+                  key={meeting.id}
+                  className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+                >
+                  <button
+                    onClick={() => router.push(`/meeting/${meeting.id}`)}
+                    className="flex-1 text-left"
+                  >
+                    <p className="text-sm font-medium text-gray-900">{meeting.title}</p>
+                    <p className="mt-1 font-mono text-xs text-gray-500">
+                      {formatDate(meeting.createdAt)} · {formatTimestamp(meeting.durationSeconds)} ·{' '}
+                      {speakerCount} speaker{speakerCount === 1 ? '' : 's'}
+                    </p>
+                  </button>
+                  <button
+                    onClick={() => handleDelete(meeting.id)}
+                    className={
+                      confirming
+                        ? 'flex-shrink-0 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700'
+                        : 'flex-shrink-0 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50'
+                    }
+                  >
+                    {confirming ? 'Confirm?' : 'Delete'}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
     </main>
   );

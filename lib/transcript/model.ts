@@ -20,3 +20,20 @@ export interface SessionBoundary {
   afterWordIndex: number; // marker rendered after this word
   reason: string;
 }
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface Meeting {
+  id: string;
+  title: string; // user-editable, defaults to date/time
+  createdAt: number;
+  durationSeconds: number;
+  words: Word[];
+  speakers: Record<SpeakerId, Speaker>;
+  boundaries: SessionBoundary[];
+  summary: string | null; // markdown, set in Phase 7
+  chatHistory: ChatMessage[]; // set in Phase 7
+}

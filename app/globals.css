@@ -12,12 +12,12 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/*
+ * No dark-mode variant, intentionally: PLAN.md section 13 specifies a
+ * single fixed light palette. Auto-switching to a dark background here
+ * (the create-next-app default) would make our gray-900 text on
+ * system-dark browsers unreadable outside the white cards.
+ */
 
 body {
   background: var(--background);
