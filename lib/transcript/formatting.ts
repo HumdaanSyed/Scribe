@@ -1,6 +1,11 @@
 import { groupWordsIntoTurns } from './grouping';
 import type { Speaker, SpeakerId, Word } from './model';
 
+/** Formats a timestamp as a medium date + short time, e.g. "Sep 14, 2026, 6:04 PM". */
+export function formatDate(ms: number): string {
+  return new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 /** Formats elapsed seconds as mm:ss (PLAN.md section 8). */
 export function formatTimestamp(seconds: number): string {
   const total = Math.max(0, Math.floor(seconds));
