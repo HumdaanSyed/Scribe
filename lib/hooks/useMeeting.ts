@@ -22,6 +22,23 @@ function defaultTitle(createdAt: number): string {
   return new Date(createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+/** Builds the full persisted shape from the id plus the fields that vary by call site. */
+function buildMeetingSnapshot(
+  meetingId: string,
+  fields: {
+    title: string;
+    createdAt: number;
+    durationSeconds: number;
+    words: Word[];
+    speakers: Record<SpeakerId, Speaker>;
+    boundaries: SessionBoundary[];
+    summary: string | null;
+    chatHistory: ChatMessage[];
+  },
+): Meeting {
+  return { id: meetingId, ...fields };
+}
+
 /**
  * Orchestrates one meeting: a brand-new id starts in 'live' mode (recorder +
  * live transcript, autosaving every ~10s while recording); an id already in
@@ -44,9 +61,22 @@ export function useMeeting(meetingId: string) {
   const [reviewBoundaries, setReviewBoundaries] = useState<SessionBoundary[]>([]);
   const [summary, setSummary] = useState<string | null>(null);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  // Set by any failed IndexedDB read/write below, so the UI has something
+  // to show instead of failing silently.
+  const [persistenceError, setPersistenceError] = useState<string | null>(null);
 
   const elapsedSeconds = useElapsedTimer(recorder.status === 'recording');
   const durationSeconds = mode === 'review' ? loadedDuration : elapsedSeconds;
+
+  /** Saves a snapshot, clearing/setting persistenceError on success/failure. */
+  const persistSnapshot = useCallback(async (snapshot: Meeting, errorPrefix: string) => {
+    try {
+      await saveMeeting(snapshot);
+      setPersistenceError(null);
+    } catch (err) {
+      setPersistenceError(err instanceof Error ? `${errorPrefix}: ${err.message}` : errorPrefix);
+    }
+  }, []);
 
   // Load an existing meeting, or start a fresh one, whenever the route's id
   // changes. `mode` starts at 'loading' via its initial state above — in
@@ -56,26 +86,40 @@ export function useMeeting(meetingId: string) {
   useEffect(() => {
     let cancelled = false;
 
-    getMeeting(meetingId).then((existing) => {
-      if (cancelled) return;
+    getMeeting(meetingId)
+      .then((existing) => {
+        if (cancelled) return;
 
-      if (existing) {
-        setTitle(existing.title);
-        setCreatedAt(existing.createdAt);
-        setLoadedDuration(existing.durationSeconds);
-        setReviewWords(existing.words);
-        setReviewSpeakers(existing.speakers);
-        setReviewBoundaries(existing.boundaries);
-        setSummary(existing.summary);
-        setChatHistory(existing.chatHistory);
-        setMode('review');
-      } else {
+        if (existing) {
+          setTitle(existing.title);
+          setCreatedAt(existing.createdAt);
+          setLoadedDuration(existing.durationSeconds);
+          setReviewWords(existing.words);
+          setReviewSpeakers(existing.speakers);
+          setReviewBoundaries(existing.boundaries);
+          setSummary(existing.summary);
+          setChatHistory(existing.chatHistory);
+          setMode('review');
+        } else {
+          const now = Date.now();
+          setTitle(defaultTitle(now));
+          setCreatedAt(now);
+          setMode('live');
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        // Couldn't tell whether this meeting already exists — fall back to
+        // a fresh live session rather than leaving the page stuck on
+        // 'loading' forever.
         const now = Date.now();
         setTitle(defaultTitle(now));
         setCreatedAt(now);
+        setPersistenceError(
+          err instanceof Error ? `Could not load this meeting: ${err.message}` : 'Could not load this meeting.',
+        );
         setMode('live');
-      }
-    });
+      });
 
     return () => {
       cancelled = true;
@@ -110,17 +154,18 @@ export function useMeeting(meetingId: string) {
 
     const interval = setInterval(() => {
       const latest = latestRef.current;
-      void saveMeeting({
-        id: meetingId,
-        title: latest.title,
-        createdAt: latest.createdAt,
-        durationSeconds: latest.elapsedSeconds,
-        words: latest.words,
-        speakers: latest.speakers,
-        boundaries: latest.boundaries,
-        summary: null,
-        chatHistory: [],
-      });
+      void saveMeeting(
+        buildMeetingSnapshot(meetingId, {
+          title: latest.title,
+          createdAt: latest.createdAt,
+          durationSeconds: latest.elapsedSeconds,
+          words: latest.words,
+          speakers: latest.speakers,
+          boundaries: latest.boundaries,
+          summary: null,
+          chatHistory: [],
+        }),
+      );
     }, AUTOSAVE_INTERVAL_MS);
 
     return () => clearInterval(interval);
@@ -149,8 +194,7 @@ export function useMeeting(meetingId: string) {
     transcript.disconnect();
 
     const latest = latestRef.current;
-    const finalMeeting: Meeting = {
-      id: meetingId,
+    const finalMeeting = buildMeetingSnapshot(meetingId, {
       title: latest.title,
       createdAt: latest.createdAt,
       durationSeconds: latest.elapsedSeconds,
@@ -159,8 +203,11 @@ export function useMeeting(meetingId: string) {
       boundaries: latest.boundaries,
       summary: null,
       chatHistory: [],
-    };
-    await saveMeeting(finalMeeting);
+    });
+    // Show what was captured either way — a failed write shouldn't leave
+    // the user stuck on the live screen with no way forward; persistSnapshot
+    // surfaces the failure via persistenceError instead.
+    await persistSnapshot(finalMeeting, 'Could not save this meeting');
 
     setLoadedDuration(finalMeeting.durationSeconds);
     setReviewWords(finalMeeting.words);
@@ -169,7 +216,7 @@ export function useMeeting(meetingId: string) {
     setSummary(finalMeeting.summary);
     setChatHistory(finalMeeting.chatHistory);
     setMode('review');
-  }, [recorder, transcript, meetingId]);
+  }, [recorder, transcript, meetingId, persistSnapshot]);
 
   const renameTitle = useCallback(
     (newTitle: string) => {
@@ -181,20 +228,33 @@ export function useMeeting(meetingId: string) {
       // title via latestRef — no need to force a write while nothing may
       // even be persisted yet.
       if (mode === 'review') {
-        void saveMeeting({
-          id: meetingId,
-          title: trimmed,
-          createdAt,
-          durationSeconds: loadedDuration,
-          words: reviewWords,
-          speakers: reviewSpeakers,
-          boundaries: reviewBoundaries,
-          summary,
-          chatHistory,
-        });
+        void persistSnapshot(
+          buildMeetingSnapshot(meetingId, {
+            title: trimmed,
+            createdAt,
+            durationSeconds: loadedDuration,
+            words: reviewWords,
+            speakers: reviewSpeakers,
+            boundaries: reviewBoundaries,
+            summary,
+            chatHistory,
+          }),
+          'Could not save the rename',
+        );
       }
     },
-    [mode, meetingId, createdAt, loadedDuration, reviewWords, reviewSpeakers, reviewBoundaries, summary, chatHistory],
+    [
+      mode,
+      meetingId,
+      createdAt,
+      loadedDuration,
+      reviewWords,
+      reviewSpeakers,
+      reviewBoundaries,
+      summary,
+      chatHistory,
+      persistSnapshot,
+    ],
   );
 
   const renameSpeaker = useCallback(
@@ -210,21 +270,35 @@ export function useMeeting(meetingId: string) {
       setReviewSpeakers((prev) => {
         if (!prev[speakerId]) return prev;
         const next = { ...prev, [speakerId]: { ...prev[speakerId], label: trimmed } };
-        void saveMeeting({
-          id: meetingId,
-          title,
-          createdAt,
-          durationSeconds: loadedDuration,
-          words: reviewWords,
-          speakers: next,
-          boundaries: reviewBoundaries,
-          summary,
-          chatHistory,
-        });
+        void persistSnapshot(
+          buildMeetingSnapshot(meetingId, {
+            title,
+            createdAt,
+            durationSeconds: loadedDuration,
+            words: reviewWords,
+            speakers: next,
+            boundaries: reviewBoundaries,
+            summary,
+            chatHistory,
+          }),
+          'Could not save the rename',
+        );
         return next;
       });
     },
-    [mode, transcript, meetingId, title, createdAt, loadedDuration, reviewWords, reviewBoundaries, summary, chatHistory],
+    [
+      mode,
+      transcript,
+      meetingId,
+      title,
+      createdAt,
+      loadedDuration,
+      reviewWords,
+      reviewBoundaries,
+      summary,
+      chatHistory,
+      persistSnapshot,
+    ],
   );
 
   return {
@@ -232,6 +306,7 @@ export function useMeeting(meetingId: string) {
     title,
     createdAt,
     durationSeconds,
+    persistenceError,
     renameTitle,
     recorder,
     transcript,

@@ -79,7 +79,7 @@ export default function MeetingPage({ params }: PageProps<'/meeting/[id]'>) {
     );
   }
 
-  const error = meeting.recorder.error ?? meeting.transcript.error;
+  const error = meeting.recorder.error ?? meeting.transcript.error ?? meeting.persistenceError;
   const sourcesLocked = meeting.recorder.status !== 'idle';
   const isLive = meeting.mode === 'live';
 
