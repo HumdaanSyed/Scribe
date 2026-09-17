@@ -4,11 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { deleteMeeting, listMeetings } from '@/lib/storage/meetings';
 import type { Meeting } from '@/lib/transcript/model';
-import { formatTimestamp } from '@/lib/transcript/formatting';
-
-function formatDate(ms: number): string {
-  return new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
-}
+import { formatDate, formatTimestamp } from '@/lib/transcript/formatting';
 
 // TEMPORARY styling. This is the real Home/History screen (PLAN.md section
 // 12) — Phase 9 applies the full design system on top of this structure.

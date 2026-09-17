@@ -8,7 +8,13 @@ import { AudioSourceToggles } from '@/components/controls/AudioSourceToggles';
 import { TranscriptView } from '@/components/transcript/TranscriptView';
 import { SummaryPanel } from '@/components/panels/SummaryPanel';
 import { ChatPanel } from '@/components/panels/ChatPanel';
-import { formatTimestamp, formatTranscriptForModel } from '@/lib/transcript/formatting';
+import { ExportDialog, type ExportOptions } from '@/components/export/ExportDialog';
+import { TranscriptPDF } from '@/components/export/TranscriptPDF';
+import { formatDate, formatTimestamp, formatTranscriptForModel } from '@/lib/transcript/formatting';
+import { groupWordsIntoTurns } from '@/lib/transcript/grouping';
+import { exportFilename } from '@/lib/export/filename';
+import { downloadBlob } from '@/lib/export/download';
+import { pdf } from '@react-pdf/renderer';
 
 // TEMPORARY styling. This is the real Live/Review screen (PLAN.md section
 // 12) — Phase 9 applies the full design system on top of this structure.
@@ -51,6 +57,38 @@ export default function MeetingPage({ params }: PageProps<'/meeting/[id]'>) {
     meeting.recorder.resume();
     meeting.transcript.resume();
   }, [meeting.recorder, meeting.transcript]);
+
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+
+  const handleExport = useCallback(
+    async ({ includeSummary, includeTimestamps }: ExportOptions) => {
+      const turns = groupWordsIntoTurns(meeting.reviewWords);
+      const participants = Object.values(meeting.reviewSpeakers).map((s) => s.label);
+
+      const blob = await pdf(
+        <TranscriptPDF
+          title={meeting.title}
+          dateLabel={formatDate(meeting.createdAt)}
+          durationLabel={formatTimestamp(meeting.durationSeconds)}
+          participants={participants}
+          turns={turns}
+          speakers={meeting.reviewSpeakers}
+          includeTimestamps={includeTimestamps}
+          summary={includeSummary ? meeting.summary : null}
+        />,
+      ).toBlob();
+
+      downloadBlob(blob, exportFilename(meeting.title, meeting.createdAt));
+    },
+    [
+      meeting.reviewWords,
+      meeting.reviewSpeakers,
+      meeting.title,
+      meeting.createdAt,
+      meeting.durationSeconds,
+      meeting.summary,
+    ],
+  );
 
   const [titleEditing, setTitleEditing] = useState(false);
   const [titleDraft, setTitleDraft] = useState(meeting.title);
@@ -206,9 +244,8 @@ export default function MeetingPage({ params }: PageProps<'/meeting/[id]'>) {
         {!isLive && (
           <div className="mt-4 flex items-center gap-2">
             <button
-              disabled
-              title="Coming in a later phase"
-              className="cursor-not-allowed rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-400"
+              onClick={() => setExportDialogOpen(true)}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
             >
               Export
             </button>
@@ -252,6 +289,13 @@ export default function MeetingPage({ params }: PageProps<'/meeting/[id]'>) {
           </div>
         )}
       </div>
+
+      <ExportDialog
+        open={exportDialogOpen}
+        onClose={() => setExportDialogOpen(false)}
+        hasSummary={!!meeting.summary}
+        onExport={handleExport}
+      />
     </main>
   );
 }
