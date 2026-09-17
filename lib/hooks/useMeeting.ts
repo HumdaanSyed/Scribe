@@ -301,6 +301,68 @@ export function useMeeting(meetingId: string) {
     ],
   );
 
+  // Summary/Q&A are review-only features (PLAN.md section 12) — both just
+  // update local state and persist immediately, the same pattern as rename.
+  const updateSummary = useCallback(
+    (newSummary: string) => {
+      setSummary(newSummary);
+      void persistSnapshot(
+        buildMeetingSnapshot(meetingId, {
+          title,
+          createdAt,
+          durationSeconds: loadedDuration,
+          words: reviewWords,
+          speakers: reviewSpeakers,
+          boundaries: reviewBoundaries,
+          summary: newSummary,
+          chatHistory,
+        }),
+        'Could not save the summary',
+      );
+    },
+    [
+      meetingId,
+      title,
+      createdAt,
+      loadedDuration,
+      reviewWords,
+      reviewSpeakers,
+      reviewBoundaries,
+      chatHistory,
+      persistSnapshot,
+    ],
+  );
+
+  const updateChatHistory = useCallback(
+    (newHistory: ChatMessage[]) => {
+      setChatHistory(newHistory);
+      void persistSnapshot(
+        buildMeetingSnapshot(meetingId, {
+          title,
+          createdAt,
+          durationSeconds: loadedDuration,
+          words: reviewWords,
+          speakers: reviewSpeakers,
+          boundaries: reviewBoundaries,
+          summary,
+          chatHistory: newHistory,
+        }),
+        'Could not save the chat',
+      );
+    },
+    [
+      meetingId,
+      title,
+      createdAt,
+      loadedDuration,
+      reviewWords,
+      reviewSpeakers,
+      reviewBoundaries,
+      summary,
+      persistSnapshot,
+    ],
+  );
+
   return {
     mode,
     title,
@@ -319,5 +381,7 @@ export function useMeeting(meetingId: string) {
     summary,
     chatHistory,
     renameSpeaker,
+    updateSummary,
+    updateChatHistory,
   };
 }

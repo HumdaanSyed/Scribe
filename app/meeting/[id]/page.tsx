@@ -1,12 +1,14 @@
 'use client';
 
-import { use, useCallback, useEffect, useRef, useState } from 'react';
+import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useMeeting } from '@/lib/hooks/useMeeting';
 import { AudioLevelMeter } from '@/components/controls/AudioLevelMeter';
 import { AudioSourceToggles } from '@/components/controls/AudioSourceToggles';
 import { TranscriptView } from '@/components/transcript/TranscriptView';
-import { formatTimestamp } from '@/lib/transcript/formatting';
+import { SummaryPanel } from '@/components/panels/SummaryPanel';
+import { ChatPanel } from '@/components/panels/ChatPanel';
+import { formatTimestamp, formatTranscriptForModel } from '@/lib/transcript/formatting';
 
 // TEMPORARY styling. This is the real Live/Review screen (PLAN.md section
 // 12) — Phase 9 applies the full design system on top of this structure.
@@ -70,6 +72,13 @@ export default function MeetingPage({ params }: PageProps<'/meeting/[id]'>) {
     meeting.renameTitle(titleDraft);
     setTitleEditing(false);
   };
+
+  // Only needed once we're in review mode, but computed unconditionally —
+  // hooks can't be called after the early return below.
+  const transcriptText = useMemo(
+    () => formatTranscriptForModel(meeting.reviewWords, meeting.reviewSpeakers),
+    [meeting.reviewWords, meeting.reviewSpeakers],
+  );
 
   if (meeting.mode === 'loading') {
     return (
@@ -201,20 +210,6 @@ export default function MeetingPage({ params }: PageProps<'/meeting/[id]'>) {
               title="Coming in a later phase"
               className="cursor-not-allowed rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-400"
             >
-              Summarize
-            </button>
-            <button
-              disabled
-              title="Coming in a later phase"
-              className="cursor-not-allowed rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-400"
-            >
-              Ask
-            </button>
-            <button
-              disabled
-              title="Coming in a later phase"
-              className="cursor-not-allowed rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-400"
-            >
               Export
             </button>
           </div>
@@ -241,6 +236,21 @@ export default function MeetingPage({ params }: PageProps<'/meeting/[id]'>) {
             />
           )}
         </div>
+
+        {!isLive && (
+          <div className="mt-6 flex flex-col gap-6">
+            <SummaryPanel
+              summary={meeting.summary}
+              transcriptText={transcriptText}
+              onSummaryComplete={meeting.updateSummary}
+            />
+            <ChatPanel
+              chatHistory={meeting.chatHistory}
+              transcriptText={transcriptText}
+              onChatHistoryChange={meeting.updateChatHistory}
+            />
+          </div>
+        )}
       </div>
     </main>
   );
