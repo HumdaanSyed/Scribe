@@ -9,8 +9,8 @@ export function InterimText({ text, inline }: InterimTextProps) {
   if (!text) return null;
 
   if (inline) {
-    return <span className="italic text-gray-400"> {text}</span>;
+    return <span className="text-fg-muted"> {text}</span>;
   }
 
-  return <p className="py-1 text-sm italic leading-relaxed text-gray-400">{text}</p>;
+  return <p className="text-base leading-7 text-fg-muted">{text}</p>;
 }

@@ -1,6 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { ErrorNotice } from '@/components/ui/ErrorNotice';
+import { cn } from '@/lib/ui/cn';
 
 export interface ExportOptions {
   includeSummary: boolean;
@@ -8,20 +11,68 @@ export interface ExportOptions {
 }
 
 interface ExportDialogProps {
-  open: boolean;
   onClose: () => void;
   hasSummary: boolean;
   onExport: (options: ExportOptions) => Promise<void>;
 }
 
-/** Transcript only / transcript + summary, plus an include-timestamps checkbox (PLAN.md section 10). */
-export function ExportDialog({ open, onClose, hasSummary, onExport }: ExportDialogProps) {
+interface ContentOptionProps {
+  title: string;
+  description: string;
+  selected: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}
+
+function ContentOption({ title, description, selected, disabled, onSelect }: ContentOptionProps) {
+  return (
+    <label
+      className={cn(
+        'flex items-start gap-3 rounded-control border p-3 transition-colors duration-150 ease-out',
+        disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+        selected ? 'border-accent bg-accent-soft' : 'border-line-strong',
+        !selected && !disabled && 'hover:bg-sunken',
+      )}
+    >
+      <input
+        type="radio"
+        name="export-content"
+        checked={selected}
+        disabled={disabled}
+        onChange={onSelect}
+        className="mt-0.5 accent-accent"
+      />
+      <span>
+        <span className="block text-sm font-medium text-fg">{title}</span>
+        <span className="block text-xs text-fg-secondary">{description}</span>
+      </span>
+    </label>
+  );
+}
+
+/**
+ * Transcript only / transcript + summary, plus an include-timestamps
+ * checkbox (PLAN.md section 10). Mounted only while open, so every open
+ * starts from a clean state.
+ */
+export function ExportDialog({ onClose, hasSummary, onExport }: ExportDialogProps) {
   const [includeSummary, setIncludeSummary] = useState(false);
   const [includeTimestamps, setIncludeTimestamps] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
-  if (!open) return null;
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !isExporting) onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose, isExporting]);
 
   const handleExport = async () => {
     setIsExporting(true);
@@ -31,66 +82,70 @@ export function ExportDialog({ open, onClose, hasSummary, onExport }: ExportDial
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not export the PDF.');
-    } finally {
       setIsExporting(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-      <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-lg">
-        <h2 className="text-base font-semibold text-gray-900">Export transcript</h2>
+    <div
+      className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-fg/30 p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !isExporting) onClose();
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="export-dialog-title"
+        tabIndex={-1}
+        className="w-full max-w-md animate-panel-in rounded-card border border-line bg-surface p-6 shadow-overlay outline-none"
+      >
+        <h2 id="export-dialog-title" className="text-xl font-semibold text-fg">
+          Export as PDF
+        </h2>
+        <p className="mt-1 text-sm text-fg-secondary">A designed document, ready to share or print.</p>
 
-        <div className="mt-4 flex flex-col gap-3">
-          <label className="flex items-center gap-2 text-sm text-gray-700">
-            <input
-              type="radio"
-              name="export-content"
-              checked={!includeSummary}
-              onChange={() => setIncludeSummary(false)}
-            />
-            Transcript only
-          </label>
-          <label
-            className={`flex items-center gap-2 text-sm ${hasSummary ? 'text-gray-700' : 'text-gray-400'}`}
-          >
-            <input
-              type="radio"
-              name="export-content"
-              checked={includeSummary}
-              disabled={!hasSummary}
-              onChange={() => setIncludeSummary(true)}
-            />
-            Transcript + summary{!hasSummary && ' (generate a summary first)'}
-          </label>
+        <fieldset className="mt-5 flex flex-col gap-2">
+          <legend className="micro-label mb-2">Contents</legend>
+          <ContentOption
+            title="Transcript only"
+            description="Speaker-labelled turns, in order."
+            selected={!includeSummary}
+            onSelect={() => setIncludeSummary(false)}
+          />
+          <ContentOption
+            title="Transcript + summary"
+            description={hasSummary ? 'Meeting notes first, then the transcript.' : 'Generate a summary first to include it.'}
+            selected={includeSummary}
+            disabled={!hasSummary}
+            onSelect={() => setIncludeSummary(true)}
+          />
+        </fieldset>
 
-          <label className="mt-2 flex items-center gap-2 text-sm text-gray-700">
-            <input
-              type="checkbox"
-              checked={includeTimestamps}
-              onChange={(e) => setIncludeTimestamps(e.target.checked)}
-            />
-            Include timestamps
-          </label>
-        </div>
+        <label className="mt-4 flex cursor-pointer items-center gap-3 text-sm text-fg">
+          <input
+            type="checkbox"
+            checked={includeTimestamps}
+            onChange={(e) => setIncludeTimestamps(e.target.checked)}
+            className="accent-accent"
+          />
+          Include timestamps
+        </label>
 
-        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+        {error && (
+          <div className="mt-4">
+            <ErrorNotice message={error} />
+          </div>
+        )}
 
         <div className="mt-6 flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            disabled={isExporting}
-            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-          >
+          <Button variant="secondary" onClick={onClose} disabled={isExporting}>
             Cancel
-          </button>
-          <button
-            onClick={handleExport}
-            disabled={isExporting}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isExporting ? 'Exporting…' : 'Export'}
-          </button>
+          </Button>
+          <Button variant="primary" onClick={() => void handleExport()} disabled={isExporting}>
+            {isExporting ? 'Exporting…' : 'Export PDF'}
+          </Button>
         </div>
       </div>
     </div>

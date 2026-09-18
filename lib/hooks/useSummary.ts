@@ -21,8 +21,12 @@ export function useSummary(onComplete: (summary: string) => void) {
           accumulated += chunk;
           setStreamingSummary(accumulated);
         });
+        if (!accumulated.trim()) throw new Error('The model returned an empty summary.');
         onComplete(accumulated);
       } catch (err) {
+        // Drop any partial text and fall back to the saved summary (if any)
+        // rather than showing something that was never persisted.
+        setStreamingSummary(null);
         setError(err instanceof Error ? err.message : 'Could not generate a summary.');
       } finally {
         setIsGenerating(false);
