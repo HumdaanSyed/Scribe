@@ -1,5 +1,7 @@
 'use client';
 
+import { cn } from '@/lib/ui/cn';
+
 interface AudioSourceTogglesProps {
   micEnabled: boolean;
   systemAudioEnabled: boolean;
@@ -7,6 +9,35 @@ interface AudioSourceTogglesProps {
   onSystemAudioChange: (enabled: boolean) => void;
   /** Locked once a recording is in progress — sources aren't changed mid-session. */
   disabled?: boolean;
+}
+
+interface SourceToggleProps {
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}
+
+function SourceToggle({ label, checked, disabled, onChange }: SourceToggleProps) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        'inline-flex h-8 items-center gap-2 rounded-control border px-3 text-sm font-medium',
+        'transition-colors duration-150 ease-out disabled:cursor-not-allowed disabled:opacity-60',
+        checked
+          ? 'border-accent bg-accent-soft text-accent'
+          : 'border-line-strong bg-surface text-fg-secondary enabled:hover:bg-sunken',
+      )}
+    >
+      <span aria-hidden className={cn('size-2 rounded-full', checked ? 'bg-accent' : 'bg-line-strong')} />
+      {label}
+    </button>
+  );
 }
 
 /**
@@ -22,35 +53,22 @@ export function AudioSourceToggles({
   disabled,
 }: AudioSourceTogglesProps) {
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-4">
-        <label className="flex items-center gap-2 text-sm text-gray-700">
-          <input
-            type="checkbox"
-            checked={micEnabled}
-            disabled={disabled}
-            onChange={(e) => onMicChange(e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
-          />
-          Microphone
-        </label>
-        <label className="flex items-center gap-2 text-sm text-gray-700">
-          <input
-            type="checkbox"
-            checked={systemAudioEnabled}
-            disabled={disabled}
-            onChange={(e) => onSystemAudioChange(e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
-          />
-          System audio
-        </label>
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <SourceToggle label="Microphone" checked={micEnabled} disabled={disabled} onChange={onMicChange} />
+        <SourceToggle
+          label="System audio"
+          checked={systemAudioEnabled}
+          disabled={disabled}
+          onChange={onSystemAudioChange}
+        />
       </div>
 
       {systemAudioEnabled && (
-        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
-          To capture background audio on macOS, choose the <strong>Chrome Tab</strong> tab in the
-          picker and enable <strong>Share tab audio</strong>. Audio from native desktop apps
-          cannot be captured without a virtual audio device.
+        <p className="animate-panel-in rounded-control border border-warn/25 bg-warn/5 px-3 py-2 text-xs leading-5 text-fg-secondary">
+          To capture background audio on macOS, choose the <strong className="font-semibold text-fg">Chrome Tab</strong>{' '}
+          tab in the picker and enable <strong className="font-semibold text-fg">Share tab audio</strong>. Audio from
+          native desktop apps cannot be captured without a virtual audio device.
         </p>
       )}
     </div>

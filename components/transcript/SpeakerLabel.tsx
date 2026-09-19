@@ -47,7 +47,8 @@ export function SpeakerLabel({ label, onRename }: SpeakerLabelProps) {
           if (e.key === 'Enter') commit();
           if (e.key === 'Escape') cancel();
         }}
-        className="rounded border border-indigo-300 bg-white px-1 py-0.5 text-sm font-medium text-gray-900 outline-none focus:ring-2 focus:ring-indigo-500"
+        aria-label="Speaker name"
+        className="h-7 w-44 rounded-chip border border-accent bg-surface px-2 text-sm font-medium text-fg focus-visible:outline-offset-0"
       />
     );
   }
@@ -59,7 +60,7 @@ export function SpeakerLabel({ label, onRename }: SpeakerLabelProps) {
         setDraft(label);
         setEditing(true);
       }}
-      className="rounded px-1 py-0.5 text-sm font-medium text-gray-900 hover:bg-gray-200"
+      className="-mx-2 rounded-chip px-2 py-0.5 text-sm font-medium text-fg transition-colors duration-150 ease-out hover:bg-sunken"
       title="Click to rename"
     >
       {label}

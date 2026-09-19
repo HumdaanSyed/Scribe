@@ -1,26 +1,142 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
 /*
- * No dark-mode variant, intentionally: PLAN.md section 13 specifies a
- * single fixed light palette. Auto-switching to a dark background here
- * (the create-next-app default) would make our gray-900 text on
- * system-dark browsers unreadable outside the white cards.
+ * Design system — PLAN.md section 13 ("Clean SaaS"): cool neutrals, one
+ * confident accent, crisp borders, restrained elevation. A single fixed
+ * light palette; there is intentionally no dark-mode variant.
  */
+@theme {
+  /* Surfaces & lines */
+  --color-bg: #f7f8fa;
+  --color-surface: #ffffff;
+  --color-sunken: #f1f3f7;
+  --color-line: #e3e6ec;
+  --color-line-strong: #cbd1dc;
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* Text (fg = primary) */
+  --color-fg: #0f1729;
+  --color-fg-secondary: #4a5468;
+  --color-fg-muted: #8a94a6;
+
+  /* Accent & status */
+  --color-accent: #4f46e5;
+  --color-accent-hover: #4338ca;
+  --color-accent-soft: #eef0fe;
+  --color-ok: #047857;
+  --color-warn: #b45309;
+  --color-error: #dc2626;
+
+  /* Radii: cards/panels 10, buttons/inputs 8, chips 6 */
+  --radius-card: 10px;
+  --radius-control: 8px;
+  --radius-chip: 6px;
+
+  /* Elevation: functional only — overlays get the stronger shadow */
+  --shadow-rest: 0 1px 2px rgba(15, 23, 41, 0.04);
+  --shadow-overlay: 0 4px 12px rgba(15, 23, 41, 0.08);
+
+  /*
+   * Type scale 12 / 13 / 14 / 16 / 20 / 28, mapped onto Tailwind's
+   * xs / sm / base / lg / xl / 2xl. Body copy is 14px.
+   */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.875rem;
+  --text-base--line-height: 1.375rem;
+  --text-lg: 1rem;
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.75rem;
+  --text-2xl--line-height: 2.25rem;
+
+  /* Motion: 150ms hovers (via transition utilities), 200ms panels, 120ms live text */
+  --animate-fade-in: fade-in 120ms ease-out;
+  --animate-panel-in: panel-in 200ms ease-out;
+  --animate-pulse-slow: pulse-slow 2s ease-in-out infinite;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes panel-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes pulse-slow {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
+}
+
+/* Fonts are loaded via next/font in app/layout.tsx and exposed as variables. */
+@theme inline {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@layer base {
+  *,
+  ::after,
+  ::before {
+    border-color: var(--color-line);
+  }
+
+  body {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+  }
+
+  /* Every interactive element gets a visible accent focus ring. */
+  :where(a, button, input, textarea, select, summary, [role="tab"], [role="switch"], [tabindex]):focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  /* Small all-caps labels: medium weight with slight letter-spacing. */
+  .micro-label {
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-fg-muted);
+  }
+}
+
+/* Honor the OS "reduce motion" setting: no animation, instant transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::after,
+  ::before {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

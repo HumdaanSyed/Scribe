@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionBoundary, Speaker, SpeakerId, Word } from '@/lib/transcript/model';
 import { groupWordsIntoTurns } from '@/lib/transcript/grouping';
 import { Turn } from './Turn';
@@ -13,6 +13,11 @@ interface TranscriptViewProps {
   boundaries: SessionBoundary[];
   interimText: string;
   onRenameSpeaker: (speakerId: SpeakerId, label: string) => void;
+  /** Live sessions follow the newest text and fade new words in; a review starts at the top. */
+  isLive: boolean;
+  /** Designed empty state — the first thing anyone watching a demo sees. */
+  emptyTitle: string;
+  emptyHint?: string;
 }
 
 const FALLBACK_SPEAKER: Speaker = { id: '', label: 'Unknown speaker', colorIndex: 0 };
@@ -26,8 +31,12 @@ export function TranscriptView({
   boundaries,
   interimText,
   onRenameSpeaker,
+  isLive,
+  emptyTitle,
+  emptyHint,
 }: TranscriptViewProps) {
-  const turns = groupWordsIntoTurns(words);
+  // Memoized so interim-only ticks don't re-group every word.
+  const turns = useMemo(() => groupWordsIntoTurns(words), [words]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
@@ -39,12 +48,18 @@ export function TranscriptView({
   };
 
   // Auto-scroll to the bottom as new content arrives, unless the user has
-  // scrolled up to read back (PLAN.md section 8).
+  // scrolled up to read back (PLAN.md section 8). Only while live — a saved
+  // meeting should open at its beginning, not its end.
   useEffect(() => {
-    if (autoScroll) {
-      containerRef.current?.scrollTo({ top: containerRef.current.scrollHeight });
-    }
-  }, [turns.length, interimText, autoScroll]);
+    if (!isLive || !autoScroll) return;
+    containerRef.current?.scrollTo({ top: containerRef.current.scrollHeight });
+  }, [isLive, autoScroll, words.length, interimText]);
+
+  // A meeting under review starts at its beginning — including right after
+  // Stop, when this same instance was scrolled to the bottom while live.
+  useEffect(() => {
+    if (!isLive) containerRef.current?.scrollTo({ top: 0 });
+  }, [isLive]);
 
   const jumpToLatest = () => {
     setAutoScroll(true);
@@ -67,42 +82,42 @@ export function TranscriptView({
   }, []);
 
   return (
-    <div className="relative">
-      <div
-        ref={containerRef}
-        onScroll={handleScroll}
-        className="max-h-[28rem] overflow-y-auto rounded-lg bg-gray-50 p-4"
-      >
+    <div className="relative h-full min-h-0">
+      <div ref={containerRef} onScroll={handleScroll} className="h-full overflow-y-auto px-5 py-5">
         {isEmpty ? (
-          <p className="text-sm text-gray-400">Transcript will appear here…</p>
+          <div className="flex h-full flex-col items-center justify-center gap-1.5 text-center">
+            <p className="text-lg font-semibold text-fg">{emptyTitle}</p>
+            {emptyHint && <p className="max-w-xs text-sm text-fg-secondary">{emptyHint}</p>}
+          </div>
         ) : (
-          <>
+          <div className="flex flex-col gap-6">
             {leadingBoundary && <SessionBoundaryMarker reason={leadingBoundary.reason} />}
             {turns.map((turn, i) => {
               const boundary = boundariesByWordCount.get(cumulativeWordCounts[i]);
 
               return (
-                <div key={turn.words[0]?.start ?? i}>
+                <div key={turn.words[0]?.start ?? i} className="flex flex-col gap-6">
                   <Turn
                     turn={turn}
                     speaker={speakers[turn.speakerId] ?? { ...FALLBACK_SPEAKER, id: turn.speakerId }}
-                    onRenameSpeaker={(label) => onRenameSpeaker(turn.speakerId, label)}
+                    onRenameSpeaker={onRenameSpeaker}
                     interimText={i === turns.length - 1 ? interimText : undefined}
+                    fadeInWords={isLive}
                   />
                   {boundary && <SessionBoundaryMarker reason={boundary.reason} />}
                 </div>
               );
             })}
             {turns.length === 0 && <InterimText text={interimText} />}
-          </>
+          </div>
         )}
       </div>
 
-      {!autoScroll && (
+      {isLive && !autoScroll && (
         <button
           type="button"
           onClick={jumpToLatest}
-          className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-gray-900 px-3 py-1 text-xs font-medium text-white shadow"
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 animate-fade-in rounded-full bg-accent px-3.5 py-1.5 text-xs font-medium text-white shadow-overlay transition-colors duration-150 ease-out hover:bg-accent-hover"
         >
           Jump to latest
         </button>
