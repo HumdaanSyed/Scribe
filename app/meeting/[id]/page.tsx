@@ -199,20 +199,7 @@ export default function MeetingPage({ params }: PageProps<'/meeting/[id]'>) {
           )}
         </div>
 
-        {isLive ? (
-          // Available once there's a transcript to work with — i.e. after Stop.
-          <span title="Available after you stop recording" className="flex items-center gap-2">
-            <Button size="sm" variant="secondary" disabled>
-              Summarize
-            </Button>
-            <Button size="sm" variant="secondary" disabled>
-              Ask
-            </Button>
-            <Button size="sm" variant="secondary" disabled>
-              Export
-            </Button>
-          </span>
-        ) : (
+        {!isLive && (
           <Button variant="secondary" onClick={() => setExportDialogOpen(true)}>
             Export
           </Button>
@@ -286,30 +273,43 @@ export default function MeetingPage({ params }: PageProps<'/meeting/[id]'>) {
           ) : (
             <>
               <Tabs tabs={REVIEW_TABS} active={railTab} onChange={setRailTab} label="Meeting tools" />
+              {/* All panels stay mounted (inactive ones hidden) so an in-flight
+                  summary or chat request keeps its state across tab switches. */}
               <div
                 role="tabpanel"
-                id={`tabpanel-${railTab}`}
-                aria-labelledby={`tab-${railTab}`}
+                id="tabpanel-summary"
+                aria-labelledby="tab-summary"
+                hidden={railTab !== 'summary'}
                 className="min-h-0 flex-1"
               >
-                {railTab === 'summary' && (
-                  <SummaryPanel
-                    summary={meeting.summary}
-                    transcriptText={transcriptText}
-                    onSummaryComplete={meeting.updateSummary}
-                  />
-                )}
-                {railTab === 'ask' && (
-                  <ChatPanel
-                    chatHistory={meeting.chatHistory}
-                    transcriptText={transcriptText}
-                    speakerLabels={speakerLabels}
-                    onChatHistoryChange={meeting.updateChatHistory}
-                  />
-                )}
-                {railTab === 'speakers' && (
-                  <SpeakerPanel speakers={speakers} words={words} onRenameSpeaker={meeting.renameSpeaker} />
-                )}
+                <SummaryPanel
+                  summary={meeting.summary}
+                  transcriptText={transcriptText}
+                  onSummaryComplete={meeting.updateSummary}
+                />
+              </div>
+              <div
+                role="tabpanel"
+                id="tabpanel-ask"
+                aria-labelledby="tab-ask"
+                hidden={railTab !== 'ask'}
+                className="min-h-0 flex-1"
+              >
+                <ChatPanel
+                  chatHistory={meeting.chatHistory}
+                  transcriptText={transcriptText}
+                  speakerLabels={speakerLabels}
+                  onChatHistoryChange={meeting.updateChatHistory}
+                />
+              </div>
+              <div
+                role="tabpanel"
+                id="tabpanel-speakers"
+                aria-labelledby="tab-speakers"
+                hidden={railTab !== 'speakers'}
+                className="min-h-0 flex-1"
+              >
+                <SpeakerPanel speakers={speakers} words={words} onRenameSpeaker={meeting.renameSpeaker} />
               </div>
             </>
           )}

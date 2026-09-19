@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionBoundary, Speaker, SpeakerId, Word } from '@/lib/transcript/model';
 import { groupWordsIntoTurns } from '@/lib/transcript/grouping';
 import { Turn } from './Turn';
@@ -35,7 +35,8 @@ export function TranscriptView({
   emptyTitle,
   emptyHint,
 }: TranscriptViewProps) {
-  const turns = groupWordsIntoTurns(words);
+  // Memoized so interim-only ticks don't re-group every word.
+  const turns = useMemo(() => groupWordsIntoTurns(words), [words]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
@@ -53,6 +54,12 @@ export function TranscriptView({
     if (!isLive || !autoScroll) return;
     containerRef.current?.scrollTo({ top: containerRef.current.scrollHeight });
   }, [isLive, autoScroll, words.length, interimText]);
+
+  // A meeting under review starts at its beginning — including right after
+  // Stop, when this same instance was scrolled to the bottom while live.
+  useEffect(() => {
+    if (!isLive) containerRef.current?.scrollTo({ top: 0 });
+  }, [isLive]);
 
   const jumpToLatest = () => {
     setAutoScroll(true);
@@ -93,7 +100,7 @@ export function TranscriptView({
                   <Turn
                     turn={turn}
                     speaker={speakers[turn.speakerId] ?? { ...FALLBACK_SPEAKER, id: turn.speakerId }}
-                    onRenameSpeaker={(label) => onRenameSpeaker(turn.speakerId, label)}
+                    onRenameSpeaker={onRenameSpeaker}
                     interimText={i === turns.length - 1 ? interimText : undefined}
                     fadeInWords={isLive}
                   />

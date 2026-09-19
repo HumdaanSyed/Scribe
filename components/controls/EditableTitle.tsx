@@ -20,8 +20,15 @@ export function EditableTitle({ value, onCommit }: EditableTitleProps) {
     }
   }, [editing]);
 
+  // Set once an edit is committed or cancelled, so the blur that follows
+  // (Enter, or Chrome blurring an input as it unmounts) can't commit again.
+  const finishedRef = useRef(false);
+
   const commit = () => {
-    onCommit(draft);
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== value) onCommit(trimmed);
     setEditing(false);
   };
 
@@ -35,6 +42,7 @@ export function EditableTitle({ value, onCommit }: EditableTitleProps) {
         onKeyDown={(e) => {
           if (e.key === 'Enter') commit();
           if (e.key === 'Escape') {
+            finishedRef.current = true;
             setDraft(value);
             setEditing(false);
           }
@@ -49,6 +57,7 @@ export function EditableTitle({ value, onCommit }: EditableTitleProps) {
     <button
       type="button"
       onClick={() => {
+        finishedRef.current = false;
         setDraft(value);
         setEditing(true);
       }}
