@@ -1,6 +1,6 @@
 # Scribe
 
-A local demo app for live meeting transcription. Record from your microphone, a Chrome tab, or both, and watch a speaker-labelled transcript appear in real time. Afterwards, summarize the meeting, ask questions about it, rename speakers, and export a PDF.
+An application for live meeting transcription. Record from your microphone, a Chrome tab, or both, and watch a speaker-labelled transcript appear in real time. Afterwards, summarize the meeting, ask questions about it, rename speakers, and export a PDF.
 
 Runs on `localhost` only. There is no deployment, auth, or sharing.
 
